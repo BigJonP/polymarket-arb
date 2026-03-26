@@ -3,6 +3,30 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from app.constants import (
+    EXCLUSIVE_HARD_ARB_CONFIDENCE_THRESHOLD,
+    EXCLUSIVE_HARD_ARB_EXCESS_THRESHOLD,
+    EXCLUSIVE_HARD_ARB_RELATION_STRENGTH_THRESHOLD,
+    EXCLUSIVE_MIN_EXCESS_THRESHOLD,
+    EXCLUSIVE_SCORE_CONFIDENCE_WEIGHT,
+    EXCLUSIVE_SCORE_EXCESS_WEIGHT,
+    EXCLUSIVE_SCORE_RELATION_STRENGTH_WEIGHT,
+    IMPLICATION_HARD_ARB_CONFIDENCE_THRESHOLD,
+    IMPLICATION_HARD_ARB_GAP_THRESHOLD,
+    IMPLICATION_HARD_ARB_RELATION_STRENGTH_THRESHOLD,
+    IMPLICATION_MIN_GAP_THRESHOLD,
+    IMPLICATION_SCORE_CONFIDENCE_WEIGHT,
+    IMPLICATION_SCORE_GAP_WEIGHT,
+    IMPLICATION_SCORE_RELATION_STRENGTH_WEIGHT,
+    NEGATIVE_CORRELATION_MIN_JOINT_RICHNESS_THRESHOLD,
+    NEGATIVE_CORRELATION_SCORE_CONFIDENCE_WEIGHT,
+    NEGATIVE_CORRELATION_SCORE_JOINT_RICHNESS_WEIGHT,
+    NEGATIVE_CORRELATION_SCORE_RELATION_STRENGTH_WEIGHT,
+    POSITIVE_CORRELATION_MIN_DIVERGENCE_THRESHOLD,
+    POSITIVE_CORRELATION_SCORE_CONFIDENCE_WEIGHT,
+    POSITIVE_CORRELATION_SCORE_DIVERGENCE_WEIGHT,
+    POSITIVE_CORRELATION_SCORE_RELATION_STRENGTH_WEIGHT,
+)
 from app.models import Market, Relation
 from app.schemas import OpportunityType, RelationType
 
@@ -46,15 +70,24 @@ class OpportunityScorer:
         probability_b: float,
     ) -> OpportunityPayload | None:
         excess = probability_a + probability_b - 1.0
-        if excess < 0.02:
+        if excess < EXCLUSIVE_MIN_EXCESS_THRESHOLD:
             return None
 
         opportunity_type = (
             OpportunityType.HARD_ARB
-            if excess >= 0.06 and relation.confidence >= 0.82 and relation.relation_strength >= 0.8
+            if (
+                self._hard_arb_allowed(relation)
+                and excess >= EXCLUSIVE_HARD_ARB_EXCESS_THRESHOLD
+                and relation.confidence >= EXCLUSIVE_HARD_ARB_CONFIDENCE_THRESHOLD
+                and relation.relation_strength >= EXCLUSIVE_HARD_ARB_RELATION_STRENGTH_THRESHOLD
+            )
             else OpportunityType.STRUCTURAL_MISPRICING
         )
-        score = self._bounded_score(excess * 340 + relation.confidence * 18 + relation.relation_strength * 16)
+        score = self._bounded_score(
+            excess * EXCLUSIVE_SCORE_EXCESS_WEIGHT
+            + relation.confidence * EXCLUSIVE_SCORE_CONFIDENCE_WEIGHT
+            + relation.relation_strength * EXCLUSIVE_SCORE_RELATION_STRENGTH_WEIGHT
+        )
         headline = f"Exclusive markets price to {(probability_a + probability_b) * 100:.1f}%"
         summary = (
             f"Both markets are treated as mutually exclusive, yet {market_a.title} and {market_b.title} "
@@ -76,15 +109,24 @@ class OpportunityScorer:
         probability_b: float,
     ) -> OpportunityPayload | None:
         gap = probability_a - probability_b
-        if gap < 0.02:
+        if gap < IMPLICATION_MIN_GAP_THRESHOLD:
             return None
 
         opportunity_type = (
             OpportunityType.HARD_ARB
-            if gap >= 0.07 and relation.confidence >= 0.85 and relation.relation_strength >= 0.82
+            if (
+                self._hard_arb_allowed(relation)
+                and gap >= IMPLICATION_HARD_ARB_GAP_THRESHOLD
+                and relation.confidence >= IMPLICATION_HARD_ARB_CONFIDENCE_THRESHOLD
+                and relation.relation_strength >= IMPLICATION_HARD_ARB_RELATION_STRENGTH_THRESHOLD
+            )
             else OpportunityType.STRUCTURAL_MISPRICING
         )
-        score = self._bounded_score(gap * 380 + relation.confidence * 15 + relation.relation_strength * 15)
+        score = self._bounded_score(
+            gap * IMPLICATION_SCORE_GAP_WEIGHT
+            + relation.confidence * IMPLICATION_SCORE_CONFIDENCE_WEIGHT
+            + relation.relation_strength * IMPLICATION_SCORE_RELATION_STRENGTH_WEIGHT
+        )
         headline = f"Implication chain inverted by {gap * 100:.1f} pts"
         summary = (
             f"If Market A resolves true, Market B should also resolve true. "
@@ -103,15 +145,24 @@ class OpportunityScorer:
         probability_b: float,
     ) -> OpportunityPayload | None:
         gap = probability_b - probability_a
-        if gap < 0.02:
+        if gap < IMPLICATION_MIN_GAP_THRESHOLD:
             return None
 
         opportunity_type = (
             OpportunityType.HARD_ARB
-            if gap >= 0.07 and relation.confidence >= 0.85 and relation.relation_strength >= 0.82
+            if (
+                self._hard_arb_allowed(relation)
+                and gap >= IMPLICATION_HARD_ARB_GAP_THRESHOLD
+                and relation.confidence >= IMPLICATION_HARD_ARB_CONFIDENCE_THRESHOLD
+                and relation.relation_strength >= IMPLICATION_HARD_ARB_RELATION_STRENGTH_THRESHOLD
+            )
             else OpportunityType.STRUCTURAL_MISPRICING
         )
-        score = self._bounded_score(gap * 380 + relation.confidence * 15 + relation.relation_strength * 15)
+        score = self._bounded_score(
+            gap * IMPLICATION_SCORE_GAP_WEIGHT
+            + relation.confidence * IMPLICATION_SCORE_CONFIDENCE_WEIGHT
+            + relation.relation_strength * IMPLICATION_SCORE_RELATION_STRENGTH_WEIGHT
+        )
         headline = f"Reverse implication mismatch of {gap * 100:.1f} pts"
         summary = (
             f"Market B appears to imply Market A, but B is priced at {probability_b * 100:.1f}% "
@@ -130,10 +181,14 @@ class OpportunityScorer:
         probability_b: float,
     ) -> OpportunityPayload | None:
         joint_richness = probability_a + probability_b - 1.0
-        if joint_richness < 0.08:
+        if joint_richness < NEGATIVE_CORRELATION_MIN_JOINT_RICHNESS_THRESHOLD:
             return None
 
-        score = self._bounded_score(joint_richness * 220 + relation.confidence * 12 + relation.relation_strength * 12)
+        score = self._bounded_score(
+            joint_richness * NEGATIVE_CORRELATION_SCORE_JOINT_RICHNESS_WEIGHT
+            + relation.confidence * NEGATIVE_CORRELATION_SCORE_CONFIDENCE_WEIGHT
+            + relation.relation_strength * NEGATIVE_CORRELATION_SCORE_RELATION_STRENGTH_WEIGHT
+        )
         headline = f"Negatively correlated pair looks jointly rich at {(probability_a + probability_b) * 100:.1f}%"
         summary = (
             f"The pair is not logically exclusive, but the model sees a negative relationship and both legs are priced high "
@@ -152,11 +207,15 @@ class OpportunityScorer:
         probability_b: float,
     ) -> OpportunityPayload | None:
         divergence = abs(probability_a - probability_b)
-        if divergence < 0.18:
+        if divergence < POSITIVE_CORRELATION_MIN_DIVERGENCE_THRESHOLD:
             return None
 
         richer = market_a.title if probability_a > probability_b else market_b.title
-        score = self._bounded_score(divergence * 180 + relation.confidence * 10 + relation.relation_strength * 10)
+        score = self._bounded_score(
+            divergence * POSITIVE_CORRELATION_SCORE_DIVERGENCE_WEIGHT
+            + relation.confidence * POSITIVE_CORRELATION_SCORE_CONFIDENCE_WEIGHT
+            + relation.relation_strength * POSITIVE_CORRELATION_SCORE_RELATION_STRENGTH_WEIGHT
+        )
         headline = f"Positively related markets diverge by {divergence * 100:.1f} pts"
         summary = f"The relation looks directionally aligned, but the market prices diverge much more than the link strength suggests."
         trade_idea = f"Treat {richer} as the richer leg and look for mean reversion rather than a hard hedge."
@@ -193,3 +252,5 @@ class OpportunityScorer:
     def _bounded_score(self, value: float) -> float:
         return round(max(0.0, min(100.0, value)), 1)
 
+    def _hard_arb_allowed(self, relation: Relation) -> bool:
+        return relation.detected_by in {"rule", "hybrid"}

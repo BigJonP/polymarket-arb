@@ -6,6 +6,22 @@ from dataclasses import dataclass
 from difflib import SequenceMatcher
 from itertools import combinations
 
+from app.constants import (
+    CANDIDATE_DATE_BUCKET_INDEX_MAX_BUCKET_SIZE,
+    CANDIDATE_ENTITY_INDEX_MAX_BUCKET_SIZE,
+    CANDIDATE_KEYWORD_INDEX_MAX_BUCKET_SIZE,
+    CANDIDATE_MAX_PAIRS_PER_MARKET,
+    CANDIDATE_MIN_KEYWORD_LENGTH,
+    CANDIDATE_PAIR_SCORE_THRESHOLD,
+    CANDIDATE_SAME_CATEGORY_BONUS,
+    CANDIDATE_SAME_DATE_BUCKET_BONUS,
+    CANDIDATE_SHARED_ENTITY_CAP,
+    CANDIDATE_SHARED_ENTITY_WEIGHT,
+    CANDIDATE_SHARED_KEYWORD_CAP,
+    CANDIDATE_SHARED_KEYWORD_WEIGHT,
+    CANDIDATE_TITLE_SIMILARITY_THRESHOLD,
+    CANDIDATE_TITLE_SIMILARITY_WEIGHT,
+)
 from app.models import Market
 
 
@@ -75,9 +91,12 @@ class CandidateGenerator:
             market_a = by_id[left_id]
             market_b = by_id[right_id]
             score, reasons = self._score_pair(market_a, market_b, features[left_id], features[right_id])
-            if score < 18:
+            if score < CANDIDATE_PAIR_SCORE_THRESHOLD:
                 continue
-            if market_pair_counts[left_id] >= 20 or market_pair_counts[right_id] >= 20:
+            if (
+                market_pair_counts[left_id] >= CANDIDATE_MAX_PAIRS_PER_MARKET
+                or market_pair_counts[right_id] >= CANDIDATE_MAX_PAIRS_PER_MARKET
+            ):
                 continue
             scored_pairs.append(CandidatePair(market_a=market_a, market_b=market_b, heuristic_score=score, reasons=reasons))
             market_pair_counts[left_id] += 1
@@ -88,7 +107,11 @@ class CandidateGenerator:
 
     def _build_features(self, market: Market) -> MarketFeatures:
         text = " ".join(part for part in [market.title, market.description or "", market.rules or ""] if part)
-        keywords = {token for token in self._tokenize(text) if len(token) >= 4 and token not in STOPWORDS}
+        keywords = {
+            token
+            for token in self._tokenize(text)
+            if len(token) >= CANDIDATE_MIN_KEYWORD_LENGTH and token not in STOPWORDS
+        }
         entities = {
             token
             for token in TOKEN_RE.findall(text)
@@ -107,21 +130,33 @@ class CandidateGenerator:
         for market_id, market_features in features.items():
             for token in market_features.keywords:
                 index[token].add(market_id)
-        return {token: market_ids for token, market_ids in index.items() if 1 < len(market_ids) <= 40}
+        return {
+            token: market_ids
+            for token, market_ids in index.items()
+            if 1 < len(market_ids) <= CANDIDATE_KEYWORD_INDEX_MAX_BUCKET_SIZE
+        }
 
     def _entity_index(self, features: dict[int, MarketFeatures]) -> dict[str, set[int]]:
         index: dict[str, set[int]] = defaultdict(set)
         for market_id, market_features in features.items():
             for token in market_features.entities:
                 index[token].add(market_id)
-        return {token: market_ids for token, market_ids in index.items() if 1 < len(market_ids) <= 25}
+        return {
+            token: market_ids
+            for token, market_ids in index.items()
+            if 1 < len(market_ids) <= CANDIDATE_ENTITY_INDEX_MAX_BUCKET_SIZE
+        }
 
     def _date_bucket_index(self, features: dict[int, MarketFeatures]) -> dict[str, set[int]]:
         index: dict[str, set[int]] = defaultdict(set)
         for market_id, market_features in features.items():
             if market_features.date_bucket:
                 index[f"{market_features.category}:{market_features.date_bucket}"].add(market_id)
-        return {bucket: market_ids for bucket, market_ids in index.items() if 1 < len(market_ids) <= 20}
+        return {
+            bucket: market_ids
+            for bucket, market_ids in index.items()
+            if 1 < len(market_ids) <= CANDIDATE_DATE_BUCKET_INDEX_MAX_BUCKET_SIZE
+        }
 
     def _score_pair(
         self,
@@ -136,14 +171,14 @@ class CandidateGenerator:
         same_category = bool(features_a.category and features_a.category == features_b.category)
         same_date_bucket = bool(features_a.date_bucket and features_a.date_bucket == features_b.date_bucket)
 
-        score = min(len(shared_keywords), 5) * 4
-        score += min(len(shared_entities), 3) * 6
+        score = min(len(shared_keywords), CANDIDATE_SHARED_KEYWORD_CAP) * CANDIDATE_SHARED_KEYWORD_WEIGHT
+        score += min(len(shared_entities), CANDIDATE_SHARED_ENTITY_CAP) * CANDIDATE_SHARED_ENTITY_WEIGHT
         if same_category:
-            score += 6
+            score += CANDIDATE_SAME_CATEGORY_BONUS
         if same_date_bucket:
-            score += 6
-        if title_similarity >= 0.5:
-            score += title_similarity * 30
+            score += CANDIDATE_SAME_DATE_BUCKET_BONUS
+        if title_similarity >= CANDIDATE_TITLE_SIMILARITY_THRESHOLD:
+            score += title_similarity * CANDIDATE_TITLE_SIMILARITY_WEIGHT
 
         reasons: list[str] = []
         if shared_keywords:
@@ -154,7 +189,7 @@ class CandidateGenerator:
             reasons.append("same category")
         if same_date_bucket:
             reasons.append("similar end date")
-        if title_similarity >= 0.5:
+        if title_similarity >= CANDIDATE_TITLE_SIMILARITY_THRESHOLD:
             reasons.append(f"title similarity {title_similarity:.2f}")
 
         if not reasons and score > 0:
@@ -167,4 +202,3 @@ class CandidateGenerator:
 
     def _normalize_text(self, text: str) -> str:
         return " ".join(self._tokenize(text))
-

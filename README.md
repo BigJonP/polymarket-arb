@@ -55,9 +55,22 @@ Important values:
 
 ## Local run
 
+Shortcut with `make`:
+
+```bash
+make install
+make dev
+```
+
 ### 1. Start PostgreSQL
 
 The database is Docker-only in this project. Start it with:
+
+```bash
+make db
+```
+
+or:
 
 ```bash
 docker compose up db -d
@@ -70,6 +83,12 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r backend/requirements.txt
 uvicorn app.main:app --app-dir backend --reload
+```
+
+or:
+
+```bash
+make backend
 ```
 
 Backend endpoints:
@@ -87,6 +106,12 @@ Backend endpoints:
 cd frontend
 npm install
 npm run dev
+```
+
+or:
+
+```bash
+make frontend
 ```
 
 Open `http://localhost:5173`.
